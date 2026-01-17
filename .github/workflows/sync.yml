@@ -42,9 +42,7 @@ jobs:
       # Step 4: Run the Sync Script and inject Google secrets.
       - name: Run Sync Script
         env:
-          # Injects your Google Service Account JSON key securely.
-          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-          
-          # Injects the target folder ID from your Drive.
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        GARMIN_TOKEN: ${{ secrets.GARMIN_TOKEN }}
+        GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
+        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
