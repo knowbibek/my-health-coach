@@ -23,33 +23,31 @@ on:
 # ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
-    # The computer operating system to run on (Linux is fastest/cheapest)
     runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Download your code from this repository to the Linux machine
+      # Step 1: Download your code
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Install Python (The language our robot speaks)
-      # We use version 3.11 to avoid "End of Life" warnings
+      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 3: Install the tools (Garmin & Google libraries)
-      # It reads the list from your requirements.txt file
+      # Step 3: Install Dependencies
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      # Step 4: Run the Main Brain Script
-      # This is the part that was missing before!
+      # Step 4: Run the Script
       - name: Run Sync Script
         env:
-          # We must securely pass the Secrets from GitHub Settings into the script
-          GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
+          # --- LOAD THE TWO PARTS HERE ---
+          GARMIN_PART1: ${{ secrets.GARMIN_PART1 }}
+          GARMIN_PART2: ${{ secrets.GARMIN_PART2 }}
+          # -------------------------------
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
