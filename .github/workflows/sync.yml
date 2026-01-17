@@ -1,48 +1,53 @@
 # ==============================================================================
-# GITHUB ACTIONS WORKFLOW (The Scheduler)
-# This file tells GitHub to wake up your robot every 10 minutes.
+# GITHUB ACTIONS WORKFLOW: Health Data Sync
 # ==============================================================================
-
 name: Health Data Sync (Every 10 Mins)
 
 # ------------------------------------------------------------------------------
-# TRIGGERS: Tells GitHub when to start the robot
+# 1. TRIGGERS (The "Alarm Clock")
 # ------------------------------------------------------------------------------
 on:
   schedule:
-    # Runs the script automatically every 10 minutes, 24/7.
+    # Runs the robot automatically every 10 minutes, 24/7.
+    # Format is: 'Minute Hour Day Month DayOfWeek'
     - cron: '*/10 * * * *'
   
-  # Adds a manual "Run workflow" button in the GitHub Actions tab.
+  # Adds a "Run workflow" button in the Actions tab for manual testing.
   workflow_dispatch:
 
 # ------------------------------------------------------------------------------
-# JOBS: The actual environment and work steps
+# 2. JOBS (The "Virtual Computer")
 # ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
-    runs-on: ubuntu-latest #
+    runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Download your code (including garmin_tokens.txt).
+      # Step A: Download your code from the repository
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Set up the Python environment (using stable version 3.11).
+      # Step B: Install Python (Using version 3.11 for stability)
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 3: Install necessary Garmin and Google libraries.
+      # Step C: Install the tools listed in requirements.txt (Garmin & Google libraries)
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      # Step 4: Run the Sync Script and inject Google secrets.
+      # Step D: Run the Brain Script with the 3 Secret Chunks
       - name: Run Sync Script
         env:
-        GARMIN_TOKEN: ${{ secrets.GARMIN_TOKEN }}
-        GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-        GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          # We inject the token in 3 separate parts to prevent GitHub
+          # or the browser from cutting off the long text string.
+          GARMIN_PART1: ${{ secrets.GARMIN_PART1 }}
+          GARMIN_PART2: ${{ secrets.GARMIN_PART2 }}
+          GARMIN_PART3: ${{ secrets.GARMIN_PART3 }}
+          
+          # Google Drive credentials
+          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
