@@ -1,6 +1,6 @@
 # ==============================================================================
 # GITHUB ACTIONS WORKFLOW (The Scheduler)
-# This file acts as an alarm clock that wakes up your robot every 10 minutes.
+# This file tells GitHub to wake up your robot every 10 minutes.
 # ==============================================================================
 
 name: Health Data Sync (Every 10 Mins)
@@ -10,11 +10,10 @@ name: Health Data Sync (Every 10 Mins)
 # ------------------------------------------------------------------------------
 on:
   schedule:
-    # This runs the script every 10 minutes, 24/7.
-    # Format: "Minute Hour Day Month DayOfWeek"
+    # Runs the script every 10 minutes, 24/7.
     - cron: '*/10 * * * *'
   
-  # This adds a "Run workflow" button so you can test it manually at any time.
+  # Adds a "Run workflow" button in the Actions tab for manual testing.
   workflow_dispatch:
 
 # ------------------------------------------------------------------------------
@@ -22,33 +21,30 @@ on:
 # ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
-    # We use a standard Linux (Ubuntu) machine provided by GitHub.
     runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Download your code (including garmin_tokens.txt) to the machine.
+      # Step 1: Download your code (including garmin_tokens.txt).
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Set up the Python environment.
-      # Using 3.11 avoids the "End of Life" warnings seen in older versions.
+      # Step 2: Set up the Python environment (using version 3.11).
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 3: Install the required tools (Garmin and Google Drive libraries).
+      # Step 3: Install the required libraries (Garmin and Google Drive tools).
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      # Step 4: Execute the Brain Script.
-      # The env section safely injects your secret Google keys into the robot.
+      # Step 4: Run the Sync Script.
       - name: Run Sync Script
         env:
-          # Your Google Service Account JSON key (must be in GitHub Secrets)
+          # Your Google Service Account JSON key
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
           
-          # The ID of the folder in your Google Drive where files will be saved
+          # The ID of your target folder in Google Drive
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
