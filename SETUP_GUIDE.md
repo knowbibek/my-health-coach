@@ -30,7 +30,7 @@ To allow the automation to save files to Google Drive, you need a "Desktop" cred
 
 ---
 
-# ☁️ Google Drive Setup Guide
+# 2 Google Drive Setup Guide
 
 This section explains how to generate the `GDRIVE_OAUTH_JSON` secret needed for the automation to access your Google Drive.
 
@@ -113,11 +113,16 @@ else:
         print(f"❌ Error: {e}")
 
 
+```
+
+
 ---
 
-# 2️⃣ Garmin Token Generator
+## 2️⃣ Garmin Token Generator
 
-**Purpose:** Garmin session tokens are extremely long (~5,000 characters). This script logs you in and splits the token into 3 parts so they fit into GitHub Secrets.
+**Purpose:** Garmin session tokens are very long (~5,000 characters). This script logs you in and splits the token into 3 parts so they fit into GitHub Secrets.
+
+**Note on MFA:** If Garmin detects a new login, this script will pause and ask you to enter the MFA code sent to your email.
 
 **Steps:**
 1.  Open **[Google Colab](https://colab.research.google.com/)**.
@@ -137,6 +142,7 @@ email = input("Email: ")
 password = input("Password: ")
 
 try:
+    # This will automatically ask for MFA if Garmin requires it
     garth.login(email, password)
     
     # Export & Encode
