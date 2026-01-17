@@ -21,12 +21,29 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 # ==============================================================================
+# HELPER: AUTO-REPAIR SECRET KEYS
+# This fixes the "Incorrect Padding" error if you missed a character when copying.
+# ==============================================================================
+def safe_base64_decode(s):
+    """
+    Adds missing '=' signs to the end of the secret key so it doesn't crash.
+    """
+    # 1. Remove any accidental spaces or newlines
+    s = s.strip()
+    
+    # 2. Calculate how many '=' signs are missing
+    missing_padding = len(s) % 4
+    
+    # 3. Add them back if needed
+    if missing_padding:
+        s += '=' * (4 - missing_padding)
+        
+    return base64.b64decode(s)
+
+# ==============================================================================
 # SETTINGS: PRIVACY & CLEANUP
 # ==============================================================================
-
-# LIST 1: Bloat Removal
-# These are useless data fields Garmin sends that take up space.
-# We delete them to keep your files small and clean.
+# LIST 1: Bloat Removal (Useless data)
 KEYS_TO_DELETE = [
     'sleepMovement', 'remSleepData', 'sleepLevels', 'sleepRestlessMoments',
     'wellnessEpochSPO2DataDTOList', 'wellnessEpochRespirationDataDTOList',
@@ -40,58 +57,37 @@ KEYS_TO_DELETE = [
     'sleepEndTimestampGMT', 'calendarDate', 'userProfilePk'
 ]
 
-# LIST 2: Privacy Shield
-# These are words that might reveal your location or identity.
-# If we see these in the data, we delete that specific piece of info.
+# LIST 2: Privacy Shield (Sensitive data)
 PRIVACY_TRIGGERS = [
     'latitude', 'longitude', 'lat', 'lon', 'location', 
     'city', 'address', 'neighborhood', 'postal', 'zip', 'deviceid', 
     'userprofilepk', 'pk', 'matchid', 'campaignid'
 ]
 
-# FUNCTION: Scrub Data
-# This helper function looks through the data dictionary.
-# If it finds "trash" keys (List 1) or "sensitive" keys (List 2), it removes them.
 def scrub_data(data):
-    # If the data is a Dictionary (key: value pairs)...
     if isinstance(data, dict):
         clean_dict = {}
         for key, value in data.items():
-            # Check if this key is in our "Delete List"
-            if key in KEYS_TO_DELETE: 
-                continue # Skip it (Delete it)
+            if key in KEYS_TO_DELETE: continue
             
-            # Check if this key sounds like private info (Location/ID)
-            is_sensitive = False
-            for trigger in PRIVACY_TRIGGERS:
-                if trigger in key.lower():
-                    is_sensitive = True
-                    break
+            # Check for sensitive words
+            is_sensitive = any(trigger in key.lower() for trigger in PRIVACY_TRIGGERS)
+            if is_sensitive: continue
             
-            if is_sensitive: 
-                continue # Skip it (Delete it)
-            
-            # If safe, clean the value inside (recursive) and keep it
             clean_dict[key] = scrub_data(value)
         return clean_dict
-    
-    # If the data is a List (items in a row)...
     elif isinstance(data, list):
-        # Clean every single item in the list
         return [scrub_data(item) for item in data]
-    
-    # If it's just text or a number, keep it as is.
     return data
 
 # ==============================================================================
 # FUNCTION: UPLOAD TO GOOGLE DRIVE
-# This handles the connection to Google and sending the file.
 # ==============================================================================
 def upload_to_drive(data_dict, filename):
     try:
         print("☁️ Connecting to Google Drive...")
         
-        # 1. Get the Robot's ID Card (JSON Key) from GitHub Secrets
+        # 1. Get the Robot's ID Card (JSON Key)
         key_json = os.environ["GDRIVE_JSON"]
         service_account_info = json.loads(key_json)
         
@@ -99,21 +95,17 @@ def upload_to_drive(data_dict, filename):
         creds = Credentials.from_service_account_info(service_account_info)
         service = build('drive', 'v3', credentials=creds)
         
-        # 3. Get the specific Folder ID where we want to drop the file
+        # 3. Get the specific Folder ID
         folder_id = os.environ["GDRIVE_FOLDER_ID"]
         
-        # 4. Prepare the File Metadata (Name and Location)
-        file_metadata = {
-            'name': filename,
-            'parents': [folder_id] # Put it inside this specific folder
-        }
+        # 4. Prepare the File
+        file_metadata = {'name': filename, 'parents': [folder_id]}
         
-        # 5. Convert our Data Dictionary into a File format
-        # This converts the JSON text into a "stream" that looks like a file to Google
+        # 5. Convert JSON to a File Stream
         file_stream = io.BytesIO(json.dumps(data_dict, indent=2).encode('utf-8'))
         media = MediaIoBaseUpload(file_stream, mimetype='application/json')
         
-        # 6. Execute the Upload
+        # 6. Upload
         new_file = service.files().create(
             body=file_metadata,
             media_body=media,
@@ -121,66 +113,64 @@ def upload_to_drive(data_dict, filename):
         ).execute()
         
         print(f"   -> Upload Success! File ID: {new_file.get('id')}")
-        return True # Report success
+        return True
 
     except Exception as error_message:
         print(f"❌ DRIVE UPLOAD FAILED: {error_message}")
-        return False # Report failure
+        return False
 
 # ==============================================================================
 # MAIN ROBOT LOGIC
-# This is the "Main" script that runs when the robot wakes up.
 # ==============================================================================
 def run_sync():
     print(f"{'='*40}\n   GARMIN -> GOOGLE DRIVE AUTOMATION\n{'='*40}\n")
     
     try:
-        # STEP 1: AUTHENTICATION (Login without Password)
+        # STEP 1: AUTHENTICATION
         print("🔐 Authenticating with Garmin...")
-        
-        # Get the secret token string from GitHub
         token_str = os.environ.get("GARMIN_TOKENS")
         
-        # Safety Check: Did we forget to add the secret?
         if not token_str:
             print("❌ ERROR: GARMIN_TOKENS secret is missing!")
-            sys.exit(1) # Stop everything
+            sys.exit(1)
             
-        # Decode the token and give it to the library
-        garth.client.loads(base64.b64decode(token_str).decode())
+        # --- NEW FIX: USE SAFE DECODE ---
+        try:
+            # We use the repair function here to fix any missing '=' signs
+            decoded_token = safe_base64_decode(token_str).decode()
+            garth.client.loads(decoded_token)
+        except Exception as e:
+            print(f"❌ TOKEN ERROR: Could not read the secret key. Details: {e}")
+            sys.exit(1)
+        # --------------------------------
         
-        # Initialize the Garmin client
         client = Garmin()
         client.garth = garth.client
-        client.display_name = "User" # Generic name
+        client.display_name = "User"
         print("   -> Success. Logged in.\n")
         
         # STEP 2: SETUP TIME (Central Standard Time)
-        # We need to know what "Today" is in Texas, not in the Cloud server.
-        CST = timezone(timedelta(hours=-6)) # CST is UTC -6 hours
+        CST = timezone(timedelta(hours=-6))
         now_cst = datetime.now(CST)
         
-        today_date = now_cst.date().isoformat()         # Format: 2024-01-01
-        timestamp = now_cst.strftime("%Y-%m-%d_%H-%M-%S") # Format: 2024-01-01_13-30-00
+        today_date = now_cst.date().isoformat()
+        timestamp = now_cst.strftime("%Y-%m-%d_%H-%M-%S")
         
         print(f"📅 Target Date: {today_date}")
         print(f"🕒 Timestamp:   {timestamp} (CST)\n")
         
-        # Create a container for our data
         data_packet = {
             "timestamp": timestamp,
             "date_query": today_date
         }
 
         # STEP 3: FETCH DATA
-        # Attempt to get Sleep Data
         try:
             data_packet["sleep"] = client.get_sleep_data(today_date)
             print("   [+] Sleep Data Found")
         except: 
-            print("   [-] Sleep Data Not Found (Maybe you are awake?)")
+            print("   [-] Sleep Data Not Found")
 
-        # Attempt to get Body Battery Data
         try:
             data_packet["body_battery"] = client.get_body_battery(today_date)
             print("   [+] Body Battery Found")
@@ -188,31 +178,24 @@ def run_sync():
             print("   [-] Body Battery Not Found")
 
         # STEP 4: CLEAN & UPLOAD
-        # Only upload if we actually found data (length > 2 means we have more than just the timestamp)
         if len(data_packet) > 2:
             print("\n🧹 Scrubbing Data for Privacy...")
-            
-            # Run the cleaning function
             clean_payload = scrub_data(data_packet)
-            
-            # Create the filename
             filename = f"health_{timestamp}.json"
             
-            # Send it to Google Drive
             success = upload_to_drive(clean_payload, filename)
             
             if success:
                 print(f"\n✅ MISSION COMPLETE: File saved to 'gemini_health'")
             else:
-                sys.exit(1) # Fail so GitHub sends an alert
+                sys.exit(1)
         else:
-            print("\n❌ FAILURE: No data retrieved from Garmin.")
+            print("\n❌ FAILURE: No data retrieved.")
             sys.exit(1)
 
     except Exception as global_error:
         print(f"\n❌ CRITICAL ERROR: {global_error}")
         sys.exit(1)
 
-# This tells Python: "Start here!"
 if __name__ == "__main__":
     run_sync()
