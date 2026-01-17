@@ -1,53 +1,32 @@
-# ==============================================================================
-# GITHUB ACTIONS WORKFLOW (The Alarm Clock)
-# This file tells GitHub when to wake up and run your robot.
-# ==============================================================================
-
 name: Health Data Sync (Every 10 Mins)
 
-# ------------------------------------------------------------------------------
-# TRIGGERS: When should this run?
-# ------------------------------------------------------------------------------
 on:
-  # 1. AUTOMATIC: Run on a timer
   schedule:
-    # Cron syntax: "Minute Hour Day Month DayOfWeek"
-    # "*/10" means "Run at minute 0, 10, 20, 30, 40, 50" of every hour
     - cron: '*/10 * * * *'
-  
-  # 2. MANUAL: Allow me to click a "Run Now" button in the Actions tab
   workflow_dispatch:
 
-# ------------------------------------------------------------------------------
-# JOBS: The actual work needed to be done
-# ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
     runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Download your code
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 3: Install Dependencies
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      # Step 4: Run the Script
       - name: Run Sync Script
         env:
-          # --- LOAD THE TWO PARTS HERE ---
+          # Pass both halves of the token securely
           GARMIN_PART1: ${{ secrets.GARMIN_PART1 }}
           GARMIN_PART2: ${{ secrets.GARMIN_PART2 }}
-          # -------------------------------
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
