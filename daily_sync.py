@@ -1,128 +1,188 @@
 # ==============================================================================
-#  GARMIN -> GOOGLE DRIVE SYNC (PRIVACY & AI OPTIMIZED)
+#  HEALTH SYNC ROBOT (Clean, Private, CST Timezone)
 #  ----------------------------------------------------------------------------
-#  Features:
-#    1. 100% Privacy: Removes Device IDs, User IDs, and Location data.
-#    2. AI-Ready: Formats data specifically for LLMs/Dashboards.
-#    3. Clean Drive: Overwrites 'health_latest.json' to prevent clutter.
+#  1. Authenticates with Garmin (using 3-part secret)
+#  2. Fetches raw data and aggressively filters out "noise" (privacy focused)
+#  3. Saves a timestamped summary file to Google Drive
 # ==============================================================================
 
-import json, os, sys, base64, io, re
+import json
+import os
+import sys
+import base64
+import io
+import re
 from datetime import datetime, timezone, timedelta
+
+# --- External Libraries ---
 from garminconnect import Garmin
 import garth
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
+# ==============================================================================
+#  SECTION 1: HELPER FUNCTIONS
+# ==============================================================================
+
 def super_clean_base64(raw_string):
+    """
+    Cleans the secret token strings.
+    Removes invisible spaces/newlines and fixes padding for Base64 math.
+    """
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw_string)
-    while len(cleaned) % 4 != 0: cleaned += '='
+    while len(cleaned) % 4 != 0:
+        cleaned += '='
     return cleaned
 
-def filter_for_privacy(raw_sleep, raw_bb):
+def simplify_health_data(raw_sleep, raw_bb):
     """
-    Strictly filters data to remove IDs, location, and noise.
-    Keeps only high-level health metrics useful for AI analysis.
+    THE DATA DIET:
+    Takes massive raw data and returns a tiny, clean summary.
+    Removes all sensitive IDs, location data, and minute-by-minute noise.
     """
-    # 1. SLEEP METRICS
+    # --- 1. Process Sleep Data ---
+    # We use .get() to safely grab data, returning None if missing
     sleep_dto = raw_sleep.get('dailySleepDTO', {})
     scores = sleep_dto.get('sleepScores', {})
     
+    # Convert seconds to readable "Hours + Minutes" string
+    duration_sec = sleep_dto.get('sleepTimeSeconds', 0)
+    hours = int(duration_sec // 3600)
+    minutes = int((duration_sec % 3600) // 60)
+
     clean_sleep = {
-        "summary": "Last night's sleep data",
-        "duration_hours": round(sleep_dto.get('sleepTimeSeconds', 0) / 3600, 2),
-        "sleep_score": scores.get('overall', {}).get('value'),
-        "sleep_quality": scores.get('overall', {}).get('qualifierKey'),
-        "deep_sleep_hours": round(sleep_dto.get('deepSleepSeconds', 0) / 3600, 2),
-        "rem_sleep_hours": round(sleep_dto.get('remSleepSeconds', 0) / 3600, 2),
-        "awake_minutes": round(sleep_dto.get('awakeSleepSeconds', 0) / 60, 0),
-        "avg_stress_during_sleep": sleep_dto.get('avgSleepStress'),
-        "hrv_status": raw_sleep.get('sleepData', {}).get('hrvStatus'),
-        "avg_hrv_value": raw_sleep.get('sleepData', {}).get('avgOvernightHrv')
+        "date": sleep_dto.get('calendarDate'),
+        "total_duration": f"{hours}h {minutes}m",
+        "score": scores.get('overall', {}).get('value'),
+        "quality": scores.get('overall', {}).get('qualifierKey'), # e.g. "POOR", "GOOD"
+        "deep_sleep_mins": int(sleep_dto.get('deepSleepSeconds', 0) // 60),
+        "rem_sleep_mins": int(sleep_dto.get('remSleepSeconds', 0) // 60),
+        "awake_count": sleep_dto.get('awakeCount'),
+        "avg_stress": sleep_dto.get('avgSleepStress'),
+        "avg_hrv": raw_sleep.get('sleepData', {}).get('avgOvernightHrv'),
+        "resting_hr": sleep_dto.get('restingHeartRate')
     }
 
-    # 2. BODY BATTERY METRICS
-    # Get the most recent value from the list
-    bb_list = raw_bb if isinstance(raw_body_battery, list) else []
-    current_bb = "Unknown"
+    # --- 2. Process Body Battery ---
+    # Garmin returns a list; we usually just want the first entry (today)
+    bb_list = raw_bb if isinstance(raw_bb, list) else []
+    clean_bb = {"status": "No data available"}
     
-    if bb_list and 'bodyBatteryValuesArray' in bb_list[0]:
-        # Get the very last recorded value (most current)
-        values = bb_list[0]['bodyBatteryValuesArray']
-        if values:
-            current_bb = values[-1][1]  # The last value in the list
+    if bb_list:
+        day_data = bb_list[0]
+        # Access the graph array to find the *current* (last) value
+        graph = day_data.get('bodyBatteryValuesArray', [])
+        current_val = graph[-1][1] if graph else None
+        
+        clean_bb = {
+            "current_level": current_val,
+            "highest_charged": day_data.get('charged'),
+            "lowest_drained": day_data.get('drained'),
+        }
 
-    clean_bb = {
-        "summary": "Energy levels for the day",
-        "current_level": current_bb,
-        "charged_today": bb_list[0].get('charged') if bb_list else 0,
-        "drained_today": bb_list[0].get('drained') if bb_list else 0,
+    # Combine nicely
+    return {
+        "sleep_summary": clean_sleep,
+        "body_battery": clean_bb
     }
 
-    return {"sleep": clean_sleep, "body_battery": clean_bb}
+# ==============================================================================
+#  SECTION 2: MAIN EXECUTION
+# ==============================================================================
 
 def run_sync():
-    print(f"\n{'='*40}\n   🛡️ PRIVACY-FIRST HEALTH SYNC\n{'='*40}\n")
+    print(f"\n{'='*40}\n   🚀 STARTING SYNC ROBOT\n{'='*40}\n")
     
     try:
-        # --- PHASE 1: AUTHENTICATION ---
+        # ----------------------------------------------------------------------
+        # PHASE A: AUTHENTICATION
+        # ----------------------------------------------------------------------
+        print("🔐 [1/4] Authenticating with Garmin...")
+        
+        # 1. combine the 3 secret parts
         p1 = os.environ.get("GARMIN_PART1", "")
         p2 = os.environ.get("GARMIN_PART2", "")
         p3 = os.environ.get("GARMIN_PART3", "")
+        
         full_token = super_clean_base64(p1 + p2 + p3)
         
-        if len(full_token) < 100: sys.exit("❌ Secrets missing.")
+        if len(full_token) < 100:
+            print("❌ Error: Garmin secrets are missing or too short.")
+            sys.exit(1)
 
-        decoded_bytes = base64.b64decode(full_token)
-        garth.client.loads(decoded_bytes.decode())
+        # 2. Login
+        garth.client.loads(base64.b64decode(full_token).decode())
         client = Garmin()
         client.garth = garth.client
-        print("   ✅ Authenticated (Garmin)")
+        print("   ✅ Success: Logged in.")
 
-        # --- PHASE 2: FETCH & SANITIZE ---
+        # ----------------------------------------------------------------------
+        # PHASE B: TIMEZONE SETUP (CST)
+        # ----------------------------------------------------------------------
+        # Force Central Standard Time (UTC-6)
         CST = timezone(timedelta(hours=-6))
-        now = datetime.now(CST)
-        today_str = now.date().isoformat()
+        now_cst = datetime.now(CST)
         
-        raw_sleep = client.get_sleep_data(today_str)
-        raw_bb = client.get_body_battery(today_str)
+        date_str = now_cst.date().isoformat()      # Format: 2026-01-17
+        time_str = now_cst.strftime("%H-%M-%S")    # Format: 16-30-00
         
-        final_data = {
-            "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "date": today_str,
-            "metrics": filter_for_privacy(raw_sleep, raw_bb)
+        print(f"\n📅 [2/4] Fetching data for: {date_str} (Time: {time_str} CST)")
+
+        # ----------------------------------------------------------------------
+        # PHASE C: FETCH & CLEAN DATA
+        # ----------------------------------------------------------------------
+        raw_sleep = client.get_sleep_data(date_str)
+        raw_bb = client.get_body_battery(date_str)
+        
+        # Run the "Data Diet" function
+        final_payload = {
+            "timestamp_cst": f"{date_str}_{time_str}",
+            "data": simplify_health_data(raw_sleep, raw_bb)
         }
         
-        print(f"   ✅ Data Sanitized (IDs/Location Removed)")
+        # Show a preview in the logs (helpful for debugging)
+        print("\n🔍 PREVIEW (Clean Data for Gem):")
+        print(json.dumps(final_payload, indent=2))
 
-        # --- PHASE 3: UPLOAD (OVERWRITE MODE) ---
+        # ----------------------------------------------------------------------
+        # PHASE D: UPLOAD TO GOOGLE DRIVE
+        # ----------------------------------------------------------------------
+        print("\n☁️  [3/4] Uploading to Google Drive...")
+        
         oauth_json = os.environ.get("GDRIVE_OAUTH_JSON")
         folder_id = os.environ.get("GDRIVE_FOLDER_ID")
         
+        # Login to Drive acting as YOU (User Mode)
         creds = Credentials.from_authorized_user_info(json.loads(oauth_json))
         service = build('drive', 'v3', credentials=creds)
         
-        # Check if file exists to overwrite it instead of creating duplicates
-        query = f"name = 'health_latest.json' and '{folder_id}' in parents and trashed = false"
-        results = service.files().list(q=query, spaces='drive', fields='files(id)').execute()
-        files = results.get('files', [])
-
-        media_content = MediaIoBaseUpload(io.BytesIO(json.dumps(final_data, indent=2).encode()), mimetype='application/json')
-
-        if files:
-            # UPDATE existing file
-            file_id = files[0]['id']
-            service.files().update(fileId=file_id, media_body=media_content).execute()
-            print(f"   ✅ Updated existing file (ID: {file_id})")
-        else:
-            # CREATE new file
-            file_metadata = {'name': 'health_latest.json', 'parents': [folder_id]}
-            service.files().create(body=file_metadata, media_body=media_content).execute()
-            print(f"   ✅ Created new file")
+        # Prepare file metadata with timestamped name
+        filename = f"health_{date_str}_{time_str}.json"
+        
+        file_metadata = {
+            'name': filename, 
+            'parents': [folder_id]
+        }
+        
+        # Prepare the file content
+        media_content = MediaIoBaseUpload(
+            io.BytesIO(json.dumps(final_payload, indent=2).encode()), 
+            mimetype='application/json'
+        )
+        
+        # Create the new file
+        uploaded_file = service.files().create(
+            body=file_metadata, 
+            media_body=media_content
+        ).execute()
+        
+        print(f"   ✅ Upload Complete!")
+        print(f"   📄 Saved as: {filename}")
+        print(f"\n{'='*40}\n   🎉 MISSION ACCOMPLISHED \n{'='*40}\n")
 
     except Exception as e:
-        print(f"\n💥 ERROR: {e}")
+        print(f"\n💥 CRITICAL ERROR: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
