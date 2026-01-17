@@ -1,13 +1,13 @@
 # ==============================================================================
-# GARMIN -> GOOGLE DRIVE SYNC ROBOT (V5 - FILE-BASED AUTH)
-# This version reads the token from 'garmin_tokens.txt' to avoid browser bugs.
+# GARMIN -> GOOGLE DRIVE SYNC ROBOT (V5 - FINAL FILE FIX)
+# This script reads your login session from 'garmin_tokens.txt'.
 # ==============================================================================
 
 import json         # For handling Google Drive credentials
-import os           # For accessing system paths and environment secrets
-import sys          # For exiting the script if a problem occurs
-import base64       # For decoding the Garmin session
-import io           # For handling data in memory
+import os           # For accessing files and GitHub environment variables
+import sys          # For stopping the script if an error occurs
+import base64       # For decoding your Garmin login session
+import io           # For handling data in memory before upload
 import re           # For cleaning invisible characters from the token
 
 # Time and Date tools
@@ -25,44 +25,50 @@ from googleapiclient.http import MediaIoBaseUpload
 # ------------------------------------------------------------------------------
 def super_clean_base64(raw_string):
     """
-    Removes every single character that is NOT a valid Base64 character.
-    This kills invisible spaces and Word formatting tags.
+    Strips out every single character that is NOT a valid Base64 character.
+    This fixes issues caused by copying from browsers or Microsoft Word.
     """
     # Keep only A-Z, a-z, 0-9, +, /, and =
     cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw_string)
     
-    # Ensure the length is a multiple of 4 (Required for Base64 math)
+    # Ensure length is a multiple of 4 (Required for Base64)
     missing_padding = len(cleaned) % 4
     if missing_padding:
         cleaned += '=' * (4 - missing_padding)
     return cleaned
 
 # ------------------------------------------------------------------------------
-# 2. THE ROBOT'S MAIN LOGIC
+# 2. MAIN SYNC LOGIC
 # ------------------------------------------------------------------------------
 def run_sync():
     print(f"{'='*40}\n   GARMIN -> GOOGLE DRIVE AUTOMATION\n{'='*40}\n")
     
     try:
-        # STEP A: LOAD TOKEN FROM FILE
-        # We use a file because GitHub's secret text box was cutting off the key.
+        # --- STEP A: LOAD TOKEN FROM THE REPOSITORY FILE ---
         print("🔐 Authenticating with Garmin...")
-        token_file = "garmin_tokens.txt"
+        token_filename = "garmin_tokens.txt"
         
-        if not os.path.exists(token_file):
-            print(f"❌ ERROR: {token_file} not found in the repository!")
+        # Check if the file actually exists in the current folder
+        if not os.path.exists(token_filename):
+            print(f"❌ ERROR: Cannot find the file '{token_filename}'!")
+            print(f"   Current files visible to robot: {os.listdir('.')}")
             sys.exit(1)
             
-        with open(token_file, "r") as file:
+        with open(token_filename, "r") as file:
             raw_content = file.read()
             
-        # Remove any accidental spaces or hidden formatting characters
+        # Remove any accidental hidden spaces or formatting characters
         clean_token = super_clean_base64(raw_content)
-        print(f"   -> Token file loaded. Length: {len(clean_token)} characters.")
+        print(f"   -> Raw String: {len(raw_content)} characters.")
+        print(f"   -> Cleaned String: {len(clean_token)} characters.")
 
-        # STEP B: LOGIN TO GARMIN
+        if len(clean_token) == 0:
+            print("❌ ERROR: The 'garmin_tokens.txt' file appears to be empty!")
+            sys.exit(1)
+
+        # --- STEP B: LOGIN TO GARMIN ---
         try:
-            # Decode the text and load the session
+            # Decode the text and load the session into the 'garth' library
             decoded_bytes = base64.b64decode(clean_token)
             garth.client.loads(decoded_bytes.decode())
             
@@ -70,42 +76,37 @@ def run_sync():
             client.garth = garth.client
             print("   -> Success: Logged into Garmin.\n")
         except Exception as auth_err:
-            print(f"❌ AUTH ERROR: Could not decode token. Details: {auth_err}")
+            print(f"❌ AUTH ERROR: Decryption failed. Details: {auth_err}")
             sys.exit(1)
         
-        # STEP C: SETUP TIME (Central Standard Time)
+        # --- STEP C: FETCH DATA ---
         CST = timezone(timedelta(hours=-6))
         now = datetime.now(CST)
         today_str = now.date().isoformat()
         timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
         
-        # STEP D: FETCH DATA
-        print(f"📅 Fetching health data for: {today_str}")
+        print(f"📅 Fetching data for: {today_str}")
         health_data = {
             "timestamp": timestamp,
             "sleep": client.get_sleep_data(today_str),
             "body_battery": client.get_body_battery(today_str)
         }
 
-        # STEP E: UPLOAD TO GOOGLE DRIVE
+        # --- STEP D: UPLOAD TO GOOGLE DRIVE ---
         print("\n☁️ Connecting to Google Drive...")
-        
-        # Pull Google Secrets from the GitHub Secrets vault
         creds_info = json.loads(os.environ["GDRIVE_JSON"])
         folder_id = os.environ["GDRIVE_FOLDER_ID"]
         
-        # Authenticate with Google
         creds = Credentials.from_service_account_info(creds_info)
         service = build('drive', 'v3', credentials=creds)
         
-        # Prepare the file metadata and data stream
+        # Prepare the file
         file_metadata = {'name': f"health_{timestamp}.json", 'parents': [folder_id]}
         media = MediaIoBaseUpload(
             io.BytesIO(json.dumps(health_data, indent=2).encode()), 
             mimetype='application/json'
         )
         
-        # Perform the upload
         uploaded = service.files().create(body=file_metadata, media_body=media).execute()
         print(f"✅ MISSION COMPLETE: File ID {uploaded.get('id')}")
 
@@ -113,6 +114,6 @@ def run_sync():
         print(f"\n❌ CRITICAL SYSTEM ERROR: {global_err}")
         sys.exit(1)
 
-# Wake up the robot
+# Start the robot!
 if __name__ == "__main__":
     run_sync()
