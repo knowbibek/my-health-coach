@@ -21,26 +21,6 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 # ==============================================================================
-# HELPER: AUTO-REPAIR SECRET KEYS
-# This fixes the "Incorrect Padding" error if you missed a character when copying.
-# ==============================================================================
-def safe_base64_decode(s):
-    """
-    Adds missing '=' signs to the end of the secret key so it doesn't crash.
-    """
-    # 1. Remove any accidental spaces or newlines
-    s = s.strip()
-    
-    # 2. Calculate how many '=' signs are missing
-    missing_padding = len(s) % 4
-    
-    # 3. Add them back if needed
-    if missing_padding:
-        s += '=' * (4 - missing_padding)
-        
-    return base64.b64decode(s)
-
-# ==============================================================================
 # SETTINGS: PRIVACY & CLEANUP
 # ==============================================================================
 # LIST 1: Bloat Removal (Useless data)
@@ -126,23 +106,29 @@ def run_sync():
     print(f"{'='*40}\n   GARMIN -> GOOGLE DRIVE AUTOMATION\n{'='*40}\n")
     
     try:
-        # STEP 1: AUTHENTICATION
+        # STEP 1: AUTHENTICATION (NEW SPLIT TOKEN LOGIC)
         print("🔐 Authenticating with Garmin...")
-        token_str = os.environ.get("GARMIN_TOKENS")
         
+        # Read the two separate parts from GitHub Secrets
+        part1 = os.environ.get("GARMIN_PART1", "")
+        part2 = os.environ.get("GARMIN_PART2", "")
+        
+        # Glue them together to make the full key
+        token_str = part1 + part2
+        
+        # Safety Check
         if not token_str:
-            print("❌ ERROR: GARMIN_TOKENS secret is missing!")
+            print("❌ ERROR: Secrets GARMIN_PART1 and GARMIN_PART2 are missing!")
             sys.exit(1)
             
-        # --- NEW FIX: USE SAFE DECODE ---
+        print(f"   -> Token assembled. Total Length: {len(token_str)} chars.")
+
         try:
-            # We use the repair function here to fix any missing '=' signs
-            decoded_token = safe_base64_decode(token_str).decode()
-            garth.client.loads(decoded_token)
+            # Decode the combined string
+            garth.client.loads(base64.b64decode(token_str).decode())
         except Exception as e:
             print(f"❌ TOKEN ERROR: Could not read the secret key. Details: {e}")
             sys.exit(1)
-        # --------------------------------
         
         client = Garmin()
         client.garth = garth.client
