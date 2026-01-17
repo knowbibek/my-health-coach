@@ -1,48 +1,42 @@
 # ==============================================================================
-# GITHUB ACTIONS WORKFLOW
-# This is the "Alarm Clock" that wakes up the robot.
+# GITHUB ACTIONS WORKFLOW (The Alarm Clock)
+# This file tells GitHub when to wake up and run your robot.
 # ==============================================================================
 
 name: Health Data Sync (Every 10 Mins)
 
+# ------------------------------------------------------------------------------
 # TRIGGERS: When should this run?
+# ------------------------------------------------------------------------------
 on:
-  # 1. SCHEDULE: Run automatically on a timer
+  # 1. AUTOMATIC: Run on a timer
   schedule:
     # Cron syntax: "Minute Hour Day Month DayOfWeek"
-    # "*/10" means "Every 10 minutes" (0, 10, 20, 30...)
+    # "*/10" means "Run at minute 0, 10, 20, 30, 40, 50" of every hour
     - cron: '*/10 * * * *'
   
-  # 2. MANUAL: Allow me to click a button to run it anytime
+  # 2. MANUAL: Allow me to click a "Run Now" button in the Actions tab
   workflow_dispatch:
 
-# JOBS: The actual work to be done
+# ------------------------------------------------------------------------------
+# JOBS: The actual work needed to be done
+# ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
-    # The computer type to run on (Linux)
+    # The computer operating system to run on (Linux is fastest/cheapest)
     runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Download your code from this repository
+      # Step 1: Download your code from this repository to the Linux machine
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Install Python (The language we use)
+      # Step 2: Install Python (The language our robot speaks)
+      # We use version 3.11 to avoid "End of Life" warnings
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.11'
 
       # Step 3: Install the tools (Garmin & Google libraries)
-      - name: Install Dependencies
-        run: |
-          pip install -r requirements.txt
-
-      # Step 4: Run the Python Script
-      - name: Run Sync Script
-        env:
-          # We must pass the Secrets from GitHub Settings into the script
-          GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
-          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-        run: python daily_sync.py
+      # It reads the list from
