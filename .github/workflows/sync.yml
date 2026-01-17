@@ -39,4 +39,17 @@ jobs:
           python-version: '3.11'
 
       # Step 3: Install the tools (Garmin & Google libraries)
-      # It reads the list from
+      # It reads the list from your requirements.txt file
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      # Step 4: Run the Main Brain Script
+      # This is the part that was missing before!
+      - name: Run Sync Script
+        env:
+          # We must securely pass the Secrets from GitHub Settings into the script
+          GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
+          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: python daily_sync.py
