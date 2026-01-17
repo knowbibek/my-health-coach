@@ -1,100 +1,132 @@
 # ==============================================================================
-# GARMIN HEALTH SYNC ROBOT (V3 - SPLIT TOKEN FIX)
+# GARMIN -> GOOGLE DRIVE SYNC ROBOT (V4 - AGGRESSIVE CLEANING)
+# This script handles the assembly of split tokens and cleans invisible bugs.
 # ==============================================================================
-import json
-import os
-import sys
-import base64
-import io
-from datetime import date, datetime, timezone, timedelta
-from garminconnect import Garmin
-import garth
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 
-# --- HELPER: AUTOMATIC PADDING REPAIR ---
-def repair_and_decode(base64_string):
+import json         # For parsing Google Drive credentials
+import os           # For accessing GitHub Secrets (Environment Variables)
+import sys          # For exiting the script if a critical error occurs
+import base64       # For decoding your Garmin session token
+import io           # For handling the data file in memory before upload
+import re           # For "Regex" - used to kill invisible formatting characters
+
+# Time and Date libraries
+from datetime import date, datetime, timezone, timedelta #
+
+# Garmin & Google Drive libraries
+from garminconnect import Garmin #
+import garth #
+from google.oauth2.service_account import Credentials #
+from googleapiclient.discovery import build #
+from googleapiclient.http import MediaIoBaseUpload #
+
+# ------------------------------------------------------------------------------
+# 1. THE "GHOST BUG" KILLER (CRITICAL FIX)
+# ------------------------------------------------------------------------------
+def super_clean_base64(raw_string):
     """
-    Ensures the string is a multiple of 4 by adding '=' padding if needed.
+    This function removes every single character that is NOT a valid Base64 
+    character (A-Z, 0-9, etc.). It deletes invisible spaces and Word tags.
     """
-    base64_string = base64_string.strip()
-    missing_padding = len(base64_string) % 4
+    # Use Regex to keep ONLY valid Base64 characters: A-Z, a-z, 0-9, +, /, and =
+    cleaned = re.sub(r'[^A-Za-z0-9+/=]', '', raw_string)
+    
+    # Ensure the length is a multiple of 4 (Required for Base64 math)
+    missing_padding = len(cleaned) % 4
     if missing_padding:
-        base64_string += '=' * (4 - missing_padding)
-    return base64.b64decode(base64_string)
+        cleaned += '=' * (4 - missing_padding)
+    
+    return cleaned
 
-# --- PRIVACY SCRUBBING ---
-KEYS_TO_DELETE = ['sleepMovement', 'remSleepData', 'sleepLevels', 'deviceId', 'userProfilePk']
-PRIVACY_TRIGGERS = ['lat', 'lon', 'location', 'address', 'city']
-
+# ------------------------------------------------------------------------------
+# 2. PRIVACY SCRUBBING
+# ------------------------------------------------------------------------------
 def scrub_data(data):
+    """
+    Removes technical IDs and location data so your personal info stays private.
+    """
+    # These fields are removed to save space and protect privacy
+    KEYS_TO_REMOVE = ['deviceId', 'userProfilePk', 'sleepMovement', 'remSleepData']
+    
     if isinstance(data, dict):
-        return {k: scrub_data(v) for k, v in data.items() 
-                if k not in KEYS_TO_DELETE and not any(t in k.lower() for t in PRIVACY_TRIGGERS)}
+        return {k: scrub_data(v) for k, v in data.items() if k not in KEYS_TO_REMOVE}
     elif isinstance(data, list):
         return [scrub_data(item) for item in data]
     return data
 
-# --- MAIN SYNC FUNCTION ---
+# ------------------------------------------------------------------------------
+# 3. MAIN ROBOT EXECUTION
+# ------------------------------------------------------------------------------
 def run_sync():
     print(f"{'='*40}\n   GARMIN -> GOOGLE DRIVE AUTOMATION\n{'='*40}\n")
     
     try:
-        # 1. AUTHENTICATION: Glue the two parts together
+        # STEP A: GATHER THE SECRETS
         print("🔐 Authenticating with Garmin...")
-        p1 = os.environ.get("GARMIN_PART1", "")
-        p2 = os.environ.get("GARMIN_PART2", "")
-        full_token = p1 + p2
+        p1 = os.environ.get("GARMIN_PART1", "") #
+        p2 = os.environ.get("GARMIN_PART2", "") #
         
-        if not full_token:
-            print("❌ ERROR: GARMIN_PART1 or PART2 is missing from GitHub Secrets!")
-            sys.exit(1)
-            
-        print(f"   -> Success: Assembled {len(full_token)} characters.")
+        # Combine the two halves you put in GitHub
+        raw_combined = p1 + p2
+        
+        # CLEAN THE TOKEN: Remove invisible bugs introduced by copy-pasting
+        clean_token = super_clean_base64(raw_combined)
+        
+        print(f"   -> Raw String: {len(raw_combined)} characters.")
+        print(f"   -> Cleaned String: {len(clean_token)} characters.")
 
-        # 2. LOGIN: Use the repair helper to decode
+        # STEP B: LOGIN TO GARMIN
         try:
-            decoded_bytes = repair_and_decode(full_token)
+            # Decode the clean string into a Garmin session
+            decoded_bytes = base64.b64decode(clean_token)
             garth.client.loads(decoded_bytes.decode())
-        except Exception as e:
-            # This is where we catch if the string is still malformed
-            print(f"❌ AUTH ERROR: The assembled token is invalid. Details: {e}")
+            
+            # Start the client
+            client = Garmin()
+            client.garth = garth.client
+            print("   -> Success: Logged into Garmin.\n")
+        except Exception as auth_err:
+            print(f"❌ AUTH ERROR: The token is still invalid. Details: {auth_err}")
             sys.exit(1)
         
-        client = Garmin()
-        client.garth = garth.client
-        print("   -> Success: Logged into Garmin.\n")
-        
-        # 3. SETUP TIME (CST)
+        # STEP C: SETUP TIME (Central Standard Time)
         CST = timezone(timedelta(hours=-6))
-        today = datetime.now(CST).date().isoformat()
-        timestamp = datetime.now(CST).strftime("%Y-%m-%d_%H-%M-%S")
+        now = datetime.now(CST)
+        today_str = now.date().isoformat()
+        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
         
-        # 4. FETCH DATA
-        print(f"📅 Fetching data for: {today}")
-        data = {"timestamp": timestamp}
-        try:
-            data["sleep"] = client.get_sleep_data(today)
-            print("   [+] Sleep data retrieved.")
-        except: print("   [-] Sleep data not available.")
+        # STEP D: FETCH DATA
+        print(f"📅 Fetching health data for: {today_str}")
+        data_to_save = {
+            "timestamp": timestamp,
+            "sleep": client.get_sleep_data(today_str),
+            "body_battery": client.get_body_battery(today_str)
+        }
 
-        # 5. UPLOAD TO DRIVE
-        print("\n☁️ Uploading to Google Drive...")
+        # STEP E: UPLOAD TO GOOGLE DRIVE
+        print("\n☁️ Connecting to Google Drive...")
+        
+        # Load Google Credentials
         creds_info = json.loads(os.environ["GDRIVE_JSON"])
         creds = Credentials.from_service_account_info(creds_info)
         service = build('drive', 'v3', credentials=creds)
         
-        file_metadata = {'name': f"health_{timestamp}.json", 'parents': [os.environ["GDRIVE_FOLDER_ID"]]}
-        clean_data = scrub_data(data)
-        media = MediaIoBaseUpload(io.BytesIO(json.dumps(clean_data, indent=2).encode()), mimetype='application/json')
+        # Prepare the file for upload
+        clean_payload = scrub_data(data_to_save)
+        file_stream = io.BytesIO(json.dumps(clean_payload, indent=2).encode())
+        media = MediaIoBaseUpload(file_stream, mimetype='application/json')
         
-        file = service.files().create(body=file_metadata, media_body=media).execute()
-        print(f"✅ MISSION COMPLETE: File ID {file.get('id')}")
+        # Execute the upload to your specific folder
+        folder_id = os.environ["GDRIVE_FOLDER_ID"]
+        file_metadata = {'name': f"health_{timestamp}.json", 'parents': [folder_id]}
+        
+        uploaded_file = service.files().create(body=file_metadata, media_body=media).execute()
+        print(f"✅ MISSION COMPLETE: File ID {uploaded_file.get('id')}")
 
-    except Exception as e:
-        print(f"\n❌ CRITICAL SYSTEM ERROR: {e}")
+    except Exception as global_error:
+        print(f"\n❌ CRITICAL SYSTEM ERROR: {global_error}")
         sys.exit(1)
 
+# Start the robot
 if __name__ == "__main__":
     run_sync()
