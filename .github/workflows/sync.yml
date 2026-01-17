@@ -10,41 +10,41 @@ name: Health Data Sync (Every 10 Mins)
 # ------------------------------------------------------------------------------
 on:
   schedule:
-    # Runs the script every 10 minutes, 24/7.
+    # Runs the script automatically every 10 minutes, 24/7.
     - cron: '*/10 * * * *'
   
-  # Adds a "Run workflow" button in the Actions tab for manual testing.
+  # Adds a manual "Run workflow" button in the GitHub Actions tab.
   workflow_dispatch:
 
 # ------------------------------------------------------------------------------
-# JOBS: The actual environment and steps the robot follows
+# JOBS: The actual environment and work steps
 # ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest #
     
     steps:
       # Step 1: Download your code (including garmin_tokens.txt).
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step 2: Set up the Python environment (using version 3.11).
+      # Step 2: Set up the Python environment (using stable version 3.11).
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 3: Install the required libraries (Garmin and Google Drive tools).
+      # Step 3: Install necessary Garmin and Google libraries.
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      # Step 4: Run the Sync Script.
+      # Step 4: Run the Sync Script and inject Google secrets.
       - name: Run Sync Script
         env:
-          # Your Google Service Account JSON key
+          # Injects your Google Service Account JSON key securely.
           GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
           
-          # The ID of your target folder in Google Drive
+          # Injects the target folder ID from your Drive.
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
