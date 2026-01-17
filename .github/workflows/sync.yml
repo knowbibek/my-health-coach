@@ -1,12 +1,11 @@
 # ==============================================================================
 # GITHUB ACTIONS WORKFLOW: Health Data Sync
 # ==============================================================================
-name: Health Data Sync (Every 10 Mins)
+name: Health Data Sync (Every 60 Mins)
 
 on:
   schedule:
-    # Runs automatically every 10 minutes
-    - cron: '*/10 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch: # Allows manual trigger button
 
 jobs:
