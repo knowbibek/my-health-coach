@@ -48,33 +48,34 @@ def run_sync():
         # --- STEP A: LOAD TOKEN FROM REPOSITORY FILE ---
         print("🔐 Authenticating with Garmin...")
         
-        # Determine the absolute path to ensure the robot finds the file
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        token_filename = os.path.join(base_dir, "garmin_tokens.txt")
+        token_filename = "garmin_tokens.txt" #
         
+        # Verify the file exists in the current directory
         if not os.path.exists(token_filename):
-            print(f"❌ ERROR: File not found at {token_filename}!")
-            print(f"   Visible files: {os.listdir(base_dir)}")
+            print(f"❌ ERROR: File '{token_filename}' not found!")
+            print(f"   Visible files in current folder: {os.listdir('.')}")
             sys.exit(1)
             
-        # Read the file and clean the content
+        # Read the file directly
         with open(token_filename, "r", encoding="utf-8") as file:
             raw_content = file.read().strip()
             
+        # Aggressively clean the content to avoid "0 characters" errors
         clean_token = super_clean_base64(raw_content)
         print(f"   -> Raw String Length: {len(raw_content)} chars.")
         print(f"   -> Cleaned Token Length: {len(clean_token)} chars.")
 
         if len(clean_token) < 10:
-            print("❌ ERROR: The token file appears to be empty or corrupt!")
+            print("❌ ERROR: The token file appears to be empty or corrupted!")
             sys.exit(1)
 
         # --- STEP B: LOGIN TO GARMIN ---
         try:
-            # Decode the text and load the session into the 'garth' library
+            # Decode the clean string into a Garmin session
             decoded_bytes = base64.b64decode(clean_token)
             garth.client.loads(decoded_bytes.decode())
             
+            # Start the active Garmin client
             client = Garmin()
             client.garth = garth.client
             print("   -> Success: Logged into Garmin.\n")
@@ -83,34 +84,35 @@ def run_sync():
             sys.exit(1)
         
         # --- STEP C: FETCH DATA (Central Standard Time) ---
-        CST = timezone(timedelta(hours=-6))
+        CST = timezone(timedelta(hours=-6)) #
         now = datetime.now(CST)
         today_str = now.date().isoformat()
         timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
         
-        print(f"📅 Fetching data for: {today_str}")
+        print(f"📅 Fetching health data for: {today_str}")
         health_data = {
             "timestamp": timestamp,
             "sleep": client.get_sleep_data(today_str),
             "body_battery": client.get_body_battery(today_str)
-        }
+        } #
 
         # --- STEP D: UPLOAD TO GOOGLE DRIVE ---
         print("\n☁️ Connecting to Google Drive...")
-        creds_info = json.loads(os.environ["GDRIVE_JSON"])
-        folder_id = os.environ["GDRIVE_FOLDER_ID"]
+        creds_info = json.loads(os.environ["GDRIVE_JSON"]) #
+        folder_id = os.environ["GDRIVE_FOLDER_ID"] #
         
         # Authenticate with Google Service Account
         creds = Credentials.from_service_account_info(creds_info)
         service = build('drive', 'v3', credentials=creds)
         
-        # Prepare the file metadata and data stream
+        # Prepare file metadata and the data stream
         file_metadata = {'name': f"health_{timestamp}.json", 'parents': [folder_id]}
         media = MediaIoBaseUpload(
             io.BytesIO(json.dumps(health_data, indent=2).encode()), 
             mimetype='application/json'
         )
         
+        # Execute the upload
         uploaded = service.files().create(body=file_metadata, media_body=media).execute()
         print(f"✅ MISSION COMPLETE: File ID {uploaded.get('id')}")
 
