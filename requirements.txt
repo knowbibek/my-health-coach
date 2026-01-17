@@ -1,0 +1,5 @@
+garminconnect
+garth
+requests
+google-api-python-client
+google-auth
