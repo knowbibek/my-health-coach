@@ -3,51 +3,41 @@
 # ==============================================================================
 name: Health Data Sync (Every 10 Mins)
 
-# ------------------------------------------------------------------------------
-# 1. TRIGGERS (The "Alarm Clock")
-# ------------------------------------------------------------------------------
 on:
   schedule:
-    # Runs the robot automatically every 10 minutes, 24/7.
-    # Format is: 'Minute Hour Day Month DayOfWeek'
+    # Runs automatically every 10 minutes
     - cron: '*/10 * * * *'
-  
-  # Adds a "Run workflow" button in the Actions tab for manual testing.
-  workflow_dispatch:
+  workflow_dispatch: # Allows manual trigger button
 
-# ------------------------------------------------------------------------------
-# 2. JOBS (The "Virtual Computer")
-# ------------------------------------------------------------------------------
 jobs:
   run-sync-robot:
     runs-on: ubuntu-latest
     
     steps:
-      # Step A: Download your code from the repository
+      # 1. Download your code
       - name: Checkout Repository
         uses: actions/checkout@v3
 
-      # Step B: Install Python (Using version 3.11 for stability)
+      # 2. Install Python 3.11
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step C: Install the tools listed in requirements.txt (Garmin & Google libraries)
+      # 3. Install the tools from requirements.txt
       - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      # Step D: Run the Brain Script with the 3 Secret Chunks
+      # 4. Run the Python Script
       - name: Run Sync Script
         env:
-          # We inject the token in 3 separate parts to prevent GitHub
-          # or the browser from cutting off the long text string.
+          # Garmin Login (The 3 parts)
           GARMIN_PART1: ${{ secrets.GARMIN_PART1 }}
           GARMIN_PART2: ${{ secrets.GARMIN_PART2 }}
           GARMIN_PART3: ${{ secrets.GARMIN_PART3 }}
           
-          # Google Drive credentials
-          GDRIVE_JSON: ${{ secrets.GDRIVE_JSON }}
+          # Google Drive Login (Your new 2TB Key)
+          GDRIVE_OAUTH_JSON: ${{ secrets.GDRIVE_OAUTH_JSON }}
           GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
         run: python daily_sync.py
