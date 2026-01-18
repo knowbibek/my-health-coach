@@ -88,14 +88,14 @@ def get_clean_summary(raw_sleep, raw_bb):
     }
 
 # ==============================================================================
-#  MAIN SCRIPT
+#   MAIN SCRIPT (Updated with Deep Dive Logic)
 # ==============================================================================
 def run_sync():
-    print(f"\n{'='*40}\n   🚀 STARTING SYNC (CLEAN MODE)\n{'='*40}\n")
+    print(f"\n{'='*40}\n   🚀 STARTING SYNC (HYBRID MODE)\n{'='*40}\n")
     
     try:
-        # --- PHASE 1: LOGIN ---
-        print("🔐 [1/4] Authenticating...")
+        # --- PHASE 1: LOGIN (Unchanged) ---
+        print("🔐 [1/5] Authenticating...")
         p1 = os.environ.get("GARMIN_PART1", "")
         p2 = os.environ.get("GARMIN_PART2", "")
         p3 = os.environ.get("GARMIN_PART3", "")
@@ -110,32 +110,54 @@ def run_sync():
         client.garth = garth.client
         print("   ✅ Logged in.")
 
-        # --- PHASE 2: TIMEZONE (CST) ---
-        # Force Central Standard Time (UTC-6)
+        # --- PHASE 2: IDENTIFY USER (New Step for Deep Dive) ---
+        # We need this to get the "DisplayName" for the raw data URL
+        print("🕵️ [2/5] Identifying User...")
+        profile = garth.client.connectapi("/userprofile-service/socialProfile")
+        if isinstance(profile, list): profile = profile[0]
+        display_name = profile.get("displayName")
+        print(f"   ✅ User ID Found: {display_name}")
+
+        # --- PHASE 3: TIMEZONE (Unchanged) ---
         CST = timezone(timedelta(hours=-6))
         now_cst = datetime.now(CST)
         
-        date_str = now_cst.date().isoformat()       # 2026-01-17
-        time_str = now_cst.strftime("%H-%M-%S")     # 16-30-00
+        date_str = now_cst.date().isoformat()       # e.g. 2026-01-17
+        time_str = now_cst.strftime("%H-%M-%S")     # e.g. 16-30-00
         
-        print(f"\n📅 [2/4] Fetching Data for: {date_str} (CST Time: {time_str})")
+        print(f"\n📅 [3/5] Fetching Data for: {date_str} (CST Time: {time_str})")
 
-        # --- PHASE 3: FETCH & CLEAN ---
+        # --- PHASE 4: FETCH DATA ---
+        
+        # A. Clean Data (Your Original Logic)
         raw_sleep = client.get_sleep_data(date_str)
         raw_bb = client.get_body_battery(date_str)
         
-        # *** THE IMPORTANT PART: Filtering ***
+        # B. Deep Dive (NEW ADDITION)
+        # Pulls the 86-variable summary (Stress, Calories, RHR, etc.)
+        deep_summary = {}
+        try:
+            url = f"/usersummary-service/usersummary/daily/{display_name}?calendarDate={date_str}"
+            deep_data = garth.client.connectapi(url)
+            if isinstance(deep_data, list) and deep_data: deep_data = deep_data[0]
+            deep_summary = deep_data
+            print(f"   ✅ Deep Dive: Captured {len(deep_summary.keys())} extra variables.")
+        except Exception as e:
+            print(f"   ⚠️ Deep Dive Failed: {e}")
+
+        # *** FINAL PAYLOAD (Merged) ***
         final_payload = {
             "timestamp_cst": f"{date_str}_{time_str}",
-            "metrics": get_clean_summary(raw_sleep, raw_bb)
+            "metrics": get_clean_summary(raw_sleep, raw_bb), # Your Clean View
+            "deep_dive": deep_summary                        # The Raw Intel
         }
         
-        # Show preview in logs to verify it is SHORT
-        print("\n🔍 PREVIEW (This is what Gem will see):")
-        print(json.dumps(final_payload, indent=2))
+        # Show preview in logs
+        print("\n🔍 PREVIEW (Top Level Keys):")
+        print(list(final_payload.keys()))
 
-        # --- PHASE 4: UPLOAD ---
-        print("\n☁️  [3/4] Uploading to Drive...")
+        # --- PHASE 5: UPLOAD (Unchanged) ---
+        print("\n☁️  [4/5] Uploading to Drive...")
         
         oauth_json = os.environ.get("GDRIVE_OAUTH_JSON")
         folder_id = os.environ.get("GDRIVE_FOLDER_ID")
@@ -143,7 +165,6 @@ def run_sync():
         creds = Credentials.from_authorized_user_info(json.loads(oauth_json))
         service = build('drive', 'v3', credentials=creds)
         
-        # FILENAME: health_YYYY-MM-DD_HH-MM-SS.json
         filename = f"health_{date_str}_{time_str}.json"
         
         media = MediaIoBaseUpload(
@@ -163,6 +184,3 @@ def run_sync():
     except Exception as e:
         print(f"\n❌ CRITICAL ERROR: {e}")
         sys.exit(1)
-
-if __name__ == "__main__":
-    run_sync()
